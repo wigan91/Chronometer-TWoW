@@ -604,9 +604,7 @@ function Chronometer:OnEnable()
 	self:RegisterEvent("SPELLCAST_INTERRUPTED")
 	self:RegisterEvent("SPELLCAST_START")
 	self:RegisterEvent("SPELLCAST_STOP")
-		self.parser:RegisterEvent("Chronometer", "CHAT_MSG_SPELL_PET_DAMAGE", function (event, info) self:PET_APPLY(event, info) end)
-	self.parser:RegisterEvent("Chronometer", "CHAT_MSG_SPELL_PET_BUFF", function (event, info) self:PET_APPLY(event, info) end)
-self:RegisterEvent("PLAYER_DEAD")
+    self:RegisterEvent("PLAYER_DEAD")
 	self.parser:RegisterEvent("Chronometer", "CHAT_MSG_SPELL_SELF_DAMAGE", function(event, info) self:SELF_DAMAGE(event, info) end)
 	self.parser:RegisterEvent("Chronometer", "CHAT_MSG_SPELL_DAMAGESHIELDS_ON_SELF", function(event, info) self:SELF_DAMAGE(event, info) end)
 	self.parser:RegisterEvent("Chronometer", "CHAT_MSG_SPELL_FAILED_LOCALPLAYER", function(event, info) self:SPELL_FAILED(event, info) end)
@@ -749,6 +747,23 @@ function Chronometer:AddTimer(kind, name, duration, targeted, isgain, selforsele
 end
 
 function Chronometer:StartTimer(timer, name, target, rank, durmod)
+	target = self:DisambiguateTarget(timer, target)
+	do
+		local sp = (BS and BS["Scorpid Poison"]) or "Scorpid Poison"
+		if name == sp and target and target ~= "none" then
+			local label = tostring(target)
+			local base = label
+			local p_hash = string.find(label, " #", 1, true)
+			if p_hash then base = string.sub(label, 1, p_hash-1) end
+			local p_rt = string.find(label, " {RT", 1, true)
+			if p_rt then base = string.sub(base, 1, p_rt-1) end
+
+			local guid = self:SPGetGUIDForName(base)
+			if guid then
+				target = base.." #"..guid
+			end
+		end
+	end
 	-- check if spell is disabled
 	local _, class = UnitClass("player")
 	local timer_class = timer.x.cl == nil and class or timer.x.cl
@@ -811,6 +826,50 @@ function Chronometer:StartTimer(timer, name, target, rank, durmod)
 	self:SetCandyBarReversed(id, self.db.profile.reverse)
 	self:SetCandyBarOnClick(id, function (...) self:CandyOnClick(unpack(arg)) end, timer.x.rc, timer.x.mc)
 	self:StartCandyBar(id, true)
+end
+
+function Chronometer:DisambiguateTarget(timer, t)
+	if not timer or not timer.x or not timer.x.dn then return t end
+	local base = tostring(t or "")
+	if base == "" then return base end
+
+	if string.find(base, " #", 1, true) or string.find(base, "{RT", 1, true) then
+		return base
+	end
+
+	local unit
+	if UnitExists("pettarget") and UnitName("pettarget") == base then unit = "pettarget" end
+	if UnitExists("target") and UnitName("target") == base and not unit then unit = "target" end
+
+	local withIcon
+	if unit then
+		local idx = GetRaidTargetIndex(unit)
+		if idx then withIcon = base.." {RT"..idx.."}" end
+	end
+
+	local function used(lbl)
+		for i=1,20 do
+			local b = self.bars[i]
+			if b and b.id and b.target == lbl then
+				if not timer.x.gr or (b.timer and b.timer.x and b.timer.x.gr == timer.x.gr) then
+					return true
+				end
+			end
+		end
+		return false
+	end
+
+	if withIcon and not used(withIcon) then
+		return withIcon
+	end
+
+	if not used(base) then return base end
+	for n = 2, 9 do
+		local cand = base.." #"..n
+		if not used(cand) then return cand end
+	end
+
+	return base.." #?"
 end
 
 function Chronometer:GetDuration(duration, record, rank, cp)
@@ -1140,7 +1199,7 @@ function Chronometer:SPELL_PERIODIC(event, info)
 	self:Debug(join({aura,rank}," | "))
 	
 	if aura == "Deep Wound" then aura = "Deep Wounds"  end   
-	
+
 	local timer = self.timers[self.EVENT][aura]	
 	if timer and timer.k.g == isgain and not info.isDOT and (timer.x.a or (timer.v and timer.v > GetTime())) then
 		if timer.k.t then
@@ -1407,19 +1466,17 @@ function Chronometer:SELF_HITS(event, info)
 	end
 end
 
-function Chronometer:PET_APPLY(event, info)
-	if type(info) ~= "table" or type(info.skill) ~= "string" then return end
-	local t = string.lower(tostring(info.type or ""))
-	if t == "miss" or t == "resist" or t == "immune" or t == "dodge" or t == "parry" then return end
-	local petName = UnitExists("pet") and UnitName("pet") or nil
-	if not petName or not info.source or (string.find(info.source, petName, 1, true) == nil) then return end
-	local sp = BS and BS["Scorpid Poison"] or "Scorpid Poison"
-	if not string.find(info.skill, sp) then return end
-	for i = 1, 20 do
-		if self.bars[i].id then
-			if self.bars[i].target == info.victim and self.bars[i].name == sp then
-				self:StartTimer(self.bars[i].timer, self.bars[i].name, self.bars[i].target, self.bars[i].rank)
-			end
-		end
-	end
+function Chronometer:SPGetGUIDForName(base)
+  local name = tostring(base or "")
+  if name == "" then return nil end
+
+  local function guidOf(unit)
+    local exists, guid = UnitExists(unit)
+    if exists and guid and UnitName(unit) == name then
+      return guid
+    end
+    return nil
+  end
+
+  return guidOf("pettarget") or guidOf("target") or guidOf("mouseover")
 end
