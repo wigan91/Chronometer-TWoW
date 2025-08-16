@@ -748,19 +748,36 @@ end
 
 function Chronometer:StartTimer(timer, name, target, rank, durmod)
 	target = self:DisambiguateTarget(timer, target)
+
+	local id_target = target
 	do
 		local sp = (BS and BS["Scorpid Poison"]) or "Scorpid Poison"
 		if name == sp and target and target ~= "none" then
 			local label = tostring(target)
-			local base = label
+			local base  = label
 			local p_hash = string.find(label, " #", 1, true)
-			if p_hash then base = string.sub(label, 1, p_hash-1) end
-			local p_rt = string.find(label, " {RT", 1, true)
-			if p_rt then base = string.sub(base, 1, p_rt-1) end
+			if p_hash then base = string.sub(base, 1, p_hash-1) end
+			local p_rt = string.find(base, " {RT", 1, true)
+			if p_rt   then base = string.sub(base, 1, p_rt-1) end
 
 			local guid = self:SPGetGUIDForName(base)
 			if guid then
-				target = base.." #"..guid
+				self._spGuidOrdinal = self._spGuidOrdinal or {}
+				self._spGuidOrdinal[base] = self._spGuidOrdinal[base] or {}
+				local ord = self._spGuidOrdinal[base][guid]
+				if not ord then
+					local used = {}
+					for _,o in pairs(self._spGuidOrdinal[base]) do
+						if type(o) == "number" then used[o] = true end
+					end
+					local n = 1
+					while used[n] do n = n + 1 end
+					ord = n
+					self._spGuidOrdinal[base][guid] = ord
+				end
+
+				id_target = base.." #"..guid
+				target    = base.." #"..ord
 			end
 		end
 	end
@@ -768,7 +785,7 @@ function Chronometer:StartTimer(timer, name, target, rank, durmod)
 	local _, class = UnitClass("player")
 	local timer_class = timer.x.cl == nil and class or timer.x.cl
 	if self.db.profile.disabledSpells[timer_class][name]~=nil then return end
-		-- check if spell is disabled
+
 	if not target then target = "none" end
 	if not rank then rank = timer.r or 0 end
 	if not durmod then durmod = 0 end
@@ -777,7 +794,8 @@ function Chronometer:StartTimer(timer, name, target, rank, durmod)
 	if (not self.db.profile.selfbars) and (target == UnitName("player") or (target == "none" and timer.k.g)) then return end
 	if (self.db.profile.onlyself) and (timer.k.t ~= nil and target ~= UnitName("player")) then return end
 
-	local id, slot = name.."-"..target
+	local id, slot = name.."-"..id_target
+
 	for i = 20, 1, -1 do
 		if self.bars[i].id == id then
 			self:SetCandyBarFade(id, 0, false)
@@ -788,6 +806,7 @@ function Chronometer:StartTimer(timer, name, target, rank, durmod)
 	end
 	for i = 1, 20 do if not self.bars[i].id then slot = i; break end end
 
+	
 	self.bars[slot].id     = id
 	self.bars[slot].timer  = timer
 	self.bars[slot].name   = name
@@ -827,6 +846,7 @@ function Chronometer:StartTimer(timer, name, target, rank, durmod)
 	self:SetCandyBarOnClick(id, function (...) self:CandyOnClick(unpack(arg)) end, timer.x.rc, timer.x.mc)
 	self:StartCandyBar(id, true)
 end
+
 
 function Chronometer:DisambiguateTarget(timer, t)
 	if not timer or not timer.x or not timer.x.dn then return t end
@@ -1471,7 +1491,7 @@ function Chronometer:SPGetGUIDForName(base)
   if name == "" then return nil end
 
   local function guidOf(unit)
-    local exists, guid = UnitExists(unit)
+    local exists, guid = UnitExists(unit)  -- SuperWoW: 2º retorno = GUID
     if exists and guid and UnitName(unit) == name then
       return guid
     end
